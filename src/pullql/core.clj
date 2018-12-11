@@ -2,9 +2,11 @@
   (:require
    [clojure.set :as set]
    [clojure.spec.alpha :as s]
-   [datascript.core :as d]
-   [datascript.db :as db-internals])
-  (:import [datascript.db Datom]))
+   #_[datascript.core :as d]
+   #_[datascript.db :as db-internals]
+   [datomic.api :as d])
+  (:import #_[datascript.db Datom]
+    [datomic.db Datum]))
 
 ;; GRAMMAR
 
@@ -34,7 +36,8 @@
 ;; INTERPRETER
 
 (defn- is-attr? [db attr property]
-  (contains? (db-internals/-attrs-by db property) attr))
+  (contains? (d/entity db attr) property)
+  #_(contains? (db-internals/-attrs-by db property) attr))
 
 (defmulti ^:private impl (fn [ctx node] (first node)))
 
@@ -47,7 +50,7 @@
    (if (is-attr? db attr :db.type/derived)
      (read-fn attr db eids nil)
      (->> (d/datoms db :aevt attr)
-          (sequence (filter (fn [^Datom d] (contains? eids (.-e d)))))))))
+          (sequence (filter (fn [^Datum d] (contains? eids (.-e d)))))))))
 
 (defn- pull-pattern
   ([db read-fn pattern] (pull-pattern db read-fn pattern #{} true))
@@ -69,8 +72,8 @@
                      (pull-attr db read-fn attr)
                      (pull-attr db read-fn attr eids))
         with-datom (if (is-attr? db attr :db.cardinality/many)
-                     (fn [entities ^Datom d] (update-in entities [(.-e d) attr] conj (.-v d)))
-                     (fn [entities ^Datom d] (assoc-in entities [(.-e d) attr] (.-v d))))]
+                     (fn [entities ^Datum d] (update-in entities [(.-e d) attr] conj (.-v d)))
+                     (fn [entities ^Datum d] (assoc-in entities [(.-e d) attr] (.-v d))))]
     (update ctx :entities #(reduce with-datom % datoms))))
 
 (defmethod impl :expand [{:keys [db read-fn eids root?] :as ctx} [_ map-spec]]
@@ -78,16 +81,16 @@
         datoms            (if root?
                             (pull-attr db read-fn attr)
                             (pull-attr db read-fn attr eids))
-        child-eids        (into #{} (map (fn [^Datom d] (.-v d))) datoms)
+        child-eids        (into #{} (map (fn [^Datum d] (.-v d))) datoms)
         child-ctx         (pull-pattern db read-fn pattern child-eids)
         child-filter      (:eid-filter child-ctx)
         matching-children (select-keys (:entities child-ctx) (child-filter (:eids child-ctx)))
         with-datom        (if (is-attr? db attr :db.cardinality/many)
-                            (fn [entities ^Datom d]
+                            (fn [entities ^Datum d]
                               (if-some [[_ child] (find matching-children (.-v d))]
                                 (update-in entities [(.-e d) attr] conj child)
                                 entities))
-                            (fn [entities ^Datom d]
+                            (fn [entities ^Datum d]
                               (if-some [[_ child] (find matching-children (.-v d))]
                                 (assoc-in entities [(.-e d) attr] child)
                                 entities)))]
@@ -104,10 +107,10 @@
                            placeholder? (d/datoms db :aevt attr)
                            indexed?     (d/datoms db :avet attr v)
                            :else        (->> (d/datoms db :aevt attr)
-                                             (sequence (filter (fn [^Datom d] (= (.-v d) v))))))
+                                             (sequence (filter (fn [^Datum d] (= (.-v d) v))))))
         with-datom       (if (is-attr? db attr :db.type/ref)
-                           (fn [entities ^Datom d] (update-in entities [(.-e d) attr] conj (.-v d)))
-                           (fn [entities ^Datom d] (assoc-in entities [(.-e d) attr] (.-v d))))]
+                           (fn [entities ^Datum d] (update-in entities [(.-e d) attr] conj (.-v d)))
+                           (fn [entities ^Datum d] (assoc-in entities [(.-e d) attr] (.-v d))))]
     (-> ctx
         (update :eid-filter comp (partial set/intersection (into #{} (map #(.-e %)) matching-datoms)))
         (update :entities #(reduce with-datom % matching-datoms)))))
